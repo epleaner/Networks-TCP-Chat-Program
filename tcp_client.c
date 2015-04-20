@@ -28,12 +28,19 @@ void initialPacket();
 void initialReceive();
 void message();
 void sendMessagePacket();
+void sendBroadcastPacket();
+void sendListPacket();
+void receiveMessagePacket(int, char *, int);
+void receiveBroadcastPacket(int, char *, int);
+void receiveList(int, char *, int);
+void receiveHandle(int);
 void broadcast();
-void list();
+void sendExitPacket();
 void clientExit();
 void terminate();
 
 char *client_handle;
+char *server_name;
 int sockets[2];
 int seq_num = 0;
 int socket_num;
@@ -46,8 +53,8 @@ int main(int argc, char * argv[])
     buf = (char *) malloc(buffer_size);
 
     /* check command line arguments  */
-    if(argc != 3) {
-        printf("usage: %s host-name port-number \n", argv[0]);
+    if(argc != 4) {
+        printf("usage: %s handle server-name server-port\n", argv[0]);
 		exit(1);
     }
 	
@@ -55,8 +62,12 @@ int main(int argc, char * argv[])
 	client_handle = malloc(strlen(argv[1]) + 1);
 	strcpy(client_handle, argv[1]);
 	
+	/*	store client handle */
+	server_name = malloc(strlen(argv[2]) + 1);
+	strcpy(server_name, argv[2]);
+	
     /* set up the socket for TCP transmission  */
-    socket_num = tcp_send_setup(argv[1], argv[2]);
+    socket_num = tcp_send_setup(argv[2], argv[3]);
 
 	//	Set up sockets to select() on: stdin and server_socket
     sockets[0] = 2;
@@ -137,13 +148,13 @@ void tcp_select() {
     		message(input_buf);
     	}
     	else if(input_buf[1] == 'B' || input_buf[1] == 'b') {
-    		printf("broadcast\n");
+    		broadcast(input_buf);
     	}
     	else if(input_buf[1] == 'L' || input_buf[1] == 'l') {
-    		printf("list\n");
+    		sendListPacket();
     	}
     	else if(input_buf[1] == 'E' || input_buf[1] == 'e') {
-    		printf("exit\n");
+    		sendExitPacket();
     	}
     	else {
     		printf("unknown\n");
@@ -167,18 +178,29 @@ void tcp_receive() {
 		exit(-1);
     }
     
+    if(message_len == 0) {
+    	printf("Server terminated\n");
+    	exit(-1);
+    }
+    
     switch(buf[4]) {
     	case SERVER_MESSAGE_GOOD:
-    		printf("server message ok\n");
+    		//printf("server message ok\n");
     		break;
     	case SERVER_MESSAGE_ERROR: 
     		printf("server message error (destination handle not found)\n");
     		break;
     	case SERVER_EXIT_ACK: 
-    		printf("server ack exit ok\n");
+    		clientExit();
     		break;
     	case SERVER_LIST:
-    		printf("server list ok\n");
+    		receiveList(socket_num, buf, message_len);
+    		break;
+    	case CLIENT_MESSAGE:
+    		receiveMessagePacket(socket_num, buf, message_len);
+    		break;
+    	case CLIENT_BROADCAST:
+    		receiveBroadcastPacket(socket_num, buf, message_len);
     		break;
     	default:
     		printf("some other flag\n");
@@ -196,7 +218,8 @@ void initialPacket() {
 	packet = malloc(packetLength);
 	ptr = packet;
 		
-	memset(ptr, seqNum, 4);
+	//memset(ptr, seq_num, 4);
+	*ptr = seqNum;
 	ptr += 4;
 	
 	memset(ptr, CLIENT_INITIAL, 1);
@@ -228,7 +251,7 @@ void initialReceive() {
     		break;
     	case 3: 
     		printf("Error on initial packet (handle already taken?)\n");
-    		terminate();
+    		clientExit();
     		break;
     	default:
     		printf("some other flag\n");
@@ -266,6 +289,29 @@ void message(char *input) {
 	} 
 }
 
+void broadcast(char *input) {
+	char *command, *text, *orig;
+	
+	orig = malloc(strlen(input) + 1);
+	
+	strcpy(orig, input);
+	
+	command = strtok(input, " ");
+	
+	if(strtok(NULL, " ") == NULL) {
+		text = "";
+	}
+	else {
+		text = orig + 3;
+	}
+	
+	if(strlen(text) > 1000) {
+		printf("message cannot be longer than 1000 characters\n");
+	}
+	
+	sendBroadcastPacket(text);
+}
+
 void sendMessagePacket(char *destinationHandle, char *text) {
 	char *packet, *ptr;
 	
@@ -279,7 +325,8 @@ void sendMessagePacket(char *destinationHandle, char *text) {
 	packet = malloc(packetLength);
 	ptr = packet;
 		
-	memset(ptr, seqNum, 4);
+	//memset(ptr, seq_num, 4);
+	*ptr = seqNum;
 	ptr += 4;
 	
 	memset(ptr, CLIENT_MESSAGE, 1);
@@ -302,6 +349,148 @@ void sendMessagePacket(char *destinationHandle, char *text) {
 	sendPacket(packet, packetLength);
 }
 
+void receiveMessagePacket(int socket, char *buf, int message_len) {
+	char *clientHandle, *destHandle, *message;
+	int handleLength, destLength = (int) *(buf + 5);
+		
+	destHandle = malloc(destLength + 1); 
+	
+	memcpy(destHandle, buf + 6, destLength);
+	destHandle[destLength] = '\0';
+	
+	buf += 6 + destLength;
+	
+	handleLength = (int) *buf;
+	
+	clientHandle = malloc(handleLength + 1);
+	memcpy(clientHandle, buf + 1, handleLength);
+	clientHandle[handleLength] = '\0';
+	
+	buf += 1 + handleLength;
+	
+	message = malloc(message_len - 7 - handleLength - destLength);
+	strcpy(message, buf);
+		
+	printf("\n%s: %s\n", clientHandle, message);
+}
+
+void receiveBroadcastPacket(int socket, char *buf, int message_len) {
+	char *clientHandle, *message;
+	int handleLength = (int) *(buf + 5);
+		
+	clientHandle = malloc(handleLength + 1); 
+	
+	memcpy(clientHandle, buf + 6, handleLength);
+	clientHandle[handleLength] = '\0';
+	
+	buf += 6 + handleLength;
+	
+	message = malloc(message_len - 7 - handleLength);
+	strcpy(message, buf);
+		
+	printf("\n%s: %s\n", clientHandle, message);
+}
+
+void receiveList(int socket, char *buf, int message_len) {
+	int handleCount;
+	buf += 5;
+	
+	memcpy(&handleCount, buf, 4);
+	
+	printf("There are %d handles\n", handleCount);
+	
+	int count;
+	for(count = 0; count < handleCount; count++) {
+		receiveHandle(count);
+	}
+}
+
+void receiveHandle(int count) {
+	int message_len, handleLen;
+	char *handle;
+	
+	//now get the data on the server_socket
+    if ((message_len = recv(socket_num, buf, buffer_size, 0)) < 0) {
+		perror("recv call");
+		exit(-1);
+    }
+    
+    handleLen = (int) *buf;
+    handle = malloc(handleLen + 1);
+    memcpy(handle, buf + 1, handleLen);
+    handle[handleLen] = '\0';
+    printf("Handle %d: %s\n", count, handle);
+}
+
+void sendBroadcastPacket(char *text) {
+	char *packet, *ptr;
+	
+	int senderHandleLen = strlen(client_handle);
+	int textLen = strlen(text) + 1;
+	int seqNum = htons(seq_num);
+	
+	int packetLength = 5 + 1 + senderHandleLen + textLen;
+	
+	packet = malloc(packetLength);
+	ptr = packet;
+		
+	//memset(ptr, seq_num, 4);
+	*ptr = seqNum;
+	ptr += 4;
+	
+	memset(ptr, CLIENT_BROADCAST, 1);
+	ptr += 1;
+	
+	memset(ptr, senderHandleLen, 1);
+	ptr += 1;
+	
+	memcpy(ptr, client_handle, senderHandleLen);
+	ptr += senderHandleLen;
+	
+	strcpy(ptr, text);
+	
+	sendPacket(packet, packetLength);
+}
+
+void sendListPacket() {
+	char *packet, *ptr;
+	
+	int seqNum = htons(seq_num);
+	
+	int packetLength = 5;
+	
+	packet = malloc(packetLength);
+	ptr = packet;
+		
+	//memset(ptr, seq_num, 4);
+	*ptr = seqNum;
+	ptr += 4;
+	
+	memset(ptr, CLIENT_LIST, 1);
+	ptr += 1;
+
+	sendPacket(packet, packetLength);
+}
+
+void sendExitPacket() {
+	char *packet, *ptr;
+	
+	int seqNum = htons(seq_num);
+	
+	int packetLength = 5;
+	
+	packet = malloc(packetLength);
+	ptr = packet;
+		
+	*ptr = seqNum;
+	ptr += 4;
+	
+	memset(ptr, CLIENT_EXIT, 1);
+	ptr += 1;
+
+	sendPacket(packet, packetLength);
+}
+
 void sendPacket(char *send_buf, int send_len) {
 	int sent;
 	seq_num++;	
@@ -312,10 +501,10 @@ void sendPacket(char *send_buf, int send_len) {
 		exit(-1);
     }
 
-    printf("Amount of data sent is: %d\n", sent);
+    //printf("Amount of data sent is: %d\n", sent);
 }
 
-void terminate() {
+void clientExit() {
 	close(socket_num);
     exit(-1);
 }

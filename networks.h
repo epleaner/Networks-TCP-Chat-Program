@@ -15,6 +15,8 @@
 #define CLIENT_LIST 10
 #define SERVER_LIST 11
 
+#define TEXT_MAX 1000
+
 struct normalHeader {
 	uint32_t sequenceNum;
 	uint8_t flag;
