@@ -273,7 +273,7 @@ void clientMessageReceive(int client_socket, char *buf, int message_len) {
 		sendClientMessage(destHandle, orig, message_len);
 	} 
 	else {
-		sendMessageError(client_socket, handleLength, clientHandle);
+		sendMessageError(client_socket, destLength, destHandle);
 	}
 }
 
@@ -344,7 +344,6 @@ void sendListCount(int client_socket) {
 }
 
 void sendListHandle(int client_socket, char *handle) {
-	printf("sending handle %s\n", handle);
 	char *packet, *ptr;
 	int handleLength = strlen(handle);
 	
@@ -507,8 +506,6 @@ void clientExit(int client_socket) {
 		clients[i] = clients[i + 1];
 	}	
 	
-	client_socket_count--;
-	
-	printf("client exited %d\n", client_socket);
+	client_socket_count--;	
 }
 

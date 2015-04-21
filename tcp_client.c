@@ -30,6 +30,7 @@ void message();
 void sendMessagePacket();
 void sendBroadcastPacket();
 void sendListPacket();
+void serverMessageError(int, char *, int);
 void receiveMessagePacket(int, char *, int);
 void receiveBroadcastPacket(int, char *, int);
 void receiveList(int, char *, int);
@@ -142,26 +143,29 @@ void tcp_select() {
     	input_buf[input_len] = '\0';
     	
     	if(input_buf[0] != '%') {
-    		printf("unknown\n");
+    		printf("Invalid command\n");
     	}
     	else if(input_buf[1] == 'M' || input_buf[1] == 'm') {
     		message(input_buf);
     	}
     	else if(input_buf[1] == 'B' || input_buf[1] == 'b') {
     		broadcast(input_buf);
+    		
+    		printf("$: ");
+    		fflush(stdout);
     	}
     	else if(input_buf[1] == 'L' || input_buf[1] == 'l') {
     		sendListPacket();
+    		
+    		printf("$: ");
+    		fflush(stdout);
     	}
     	else if(input_buf[1] == 'E' || input_buf[1] == 'e') {
     		sendExitPacket();
     	}
     	else {
-    		printf("unknown\n");
+    		printf("Invalid command\n");
     	} 
-    	
-    	printf("$: ");
-    	fflush(stdout);	
 	}
 	
 	if(FD_ISSET(sockets[1], &fdvar)) {
@@ -185,10 +189,14 @@ void tcp_receive() {
     
     switch(buf[4]) {
     	case SERVER_MESSAGE_GOOD:
-    		//printf("server message ok\n");
+    		printf("$: ");
+    		fflush(stdout);
     		break;
     	case SERVER_MESSAGE_ERROR: 
-    		printf("server message error (destination handle not found)\n");
+    		serverMessageError(socket_num, buf, message_len);
+    		
+    		printf("$: ");
+    		fflush(stdout);
     		break;
     	case SERVER_EXIT_ACK: 
     		clientExit();
@@ -198,9 +206,15 @@ void tcp_receive() {
     		break;
     	case CLIENT_MESSAGE:
     		receiveMessagePacket(socket_num, buf, message_len);
+    		
+    		printf("$: ");
+    		fflush(stdout);
     		break;
     	case CLIENT_BROADCAST:
     		receiveBroadcastPacket(socket_num, buf, message_len);
+    		
+    		printf("$: ");
+    		fflush(stdout);
     		break;
     	default:
     		printf("some other flag\n");
@@ -247,10 +261,9 @@ void initialReceive() {
     
     switch(buf[4]) {
     	case 2:
-    		printf("initial packet success\n");
     		break;
     	case 3: 
-    		printf("Error on initial packet (handle already taken?)\n");
+    		printf("Handle already in use: %s\n", client_handle);
     		clientExit();
     		break;
     	default:
@@ -270,7 +283,7 @@ void message(char *input) {
 	handle = strtok(NULL, " ");
 	
 	if(handle == NULL) {
-		printf("destination client handle is required\n");
+		printf("Error, no handle given\n");
 	}
 	else {
 		if(strtok(NULL, " ") == NULL) {
@@ -282,10 +295,16 @@ void message(char *input) {
 		}
 	
 		if(strlen(text) > 1000) {
-			printf("message cannot be longer than 1000 characters\n");
+			printf("Error, message to long, message length is: %d\n", strlen(text));
+			
+			printf("$: ");
+			fflush(stdout);
+		} 
+		else {
+			sendMessagePacket(handle, text);
 		}
 	
-		sendMessagePacket(handle, text);
+		
 	} 
 }
 
@@ -306,10 +325,11 @@ void broadcast(char *input) {
 	}
 	
 	if(strlen(text) > 1000) {
-		printf("message cannot be longer than 1000 characters\n");
+		printf("Error, message to long, message length is: %d\n", strlen(text));
 	}
-	
-	sendBroadcastPacket(text);
+	else {
+		sendBroadcastPacket(text);
+	}
 }
 
 void sendMessagePacket(char *destinationHandle, char *text) {
@@ -347,6 +367,18 @@ void sendMessagePacket(char *destinationHandle, char *text) {
 	memcpy(ptr, text, textLen);
 	
 	sendPacket(packet, packetLength);
+}
+
+void serverMessageError(int socket, char *buf, int message_len) {
+	char *handle;
+	int handleLength = (int) *(buf + 5);
+	
+	handle = malloc(handleLength + 1);
+	memcpy(handle, buf + 6, handleLength);
+	handle[handleLength] = '\0';
+	
+	
+	printf("Client with handle %s does not exist\n", handle);
 }
 
 void receiveMessagePacket(int socket, char *buf, int message_len) {
@@ -397,12 +429,15 @@ void receiveList(int socket, char *buf, int message_len) {
 	
 	memcpy(&handleCount, buf, 4);
 	
-	printf("There are %d handles\n", handleCount);
-	
+	//printf("There are %d handles\n", handleCount);
+	printf("\n");
 	int count;
 	for(count = 0; count < handleCount; count++) {
 		receiveHandle(count);
 	}
+	
+	printf("$: ");
+	fflush(stdout);
 }
 
 void receiveHandle(int count) {
@@ -419,7 +454,7 @@ void receiveHandle(int count) {
     handle = malloc(handleLen + 1);
     memcpy(handle, buf + 1, handleLen);
     handle[handleLen] = '\0';
-    printf("Handle %d: %s\n", count, handle);
+    printf("%s\n", handle);
 }
 
 void sendBroadcastPacket(char *text) {
